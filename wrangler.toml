@@ -1,0 +1,8 @@
+name = "shrill-bird-59e1"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding = "HERSPACE_DB"
+database_name = "talkwithme"
+database_id = "8e99f3e9-4495-4ca9-8ab7-a2a81d38ca88"
