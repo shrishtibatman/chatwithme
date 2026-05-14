@@ -155,6 +155,60 @@ export default {
       return json(results || []);
     }
 
+    // POST /api/chat — AI proxy via OpenRouter (key stored in CF env)
+    if (request.method === 'POST' && path === '/api/chat') {
+      const b = await request.json();
+      const { system, messages, userId } = b;
+
+      // Check user status if userId provided
+      let userCtx = null;
+      if (userId) {
+        try { userCtx = await db.prepare(`SELECT * FROM users WHERE id=?`).bind(userId).first(); } catch(e) {}
+      }
+
+      const fullMsgs = [{ role: 'system', content: system }, ...messages];
+
+      const aiRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + env.GROQ_KEY
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: fullMsgs,
+          max_tokens: 120,
+          temperature: 0.95
+        })
+      });
+
+      const aiData = await aiRes.json();
+      const raw = aiData.choices?.[0]?.message?.content;
+      if (!raw) return json({ error: 'ai_failed', detail: aiData }, 502);
+
+      const reply = raw
+        .replace(/^(sure!?|of course!?|absolutely!?|certainly!?|great!?|wow!?)\s*/gi, '')
+        .replace(/\bas an ai\b.*?[.!]/gi, '')
+        .replace(/\bi('m| am) (an? )?(ai|language model|chatbot|assistant)\b.*?[.!]/gi, '')
+        .replace(/\bi (can't|cannot) (actually )?/gi, "i don't ")
+        .trim();
+
+      const lastMsg = messages[messages.length - 1]?.content || '';
+      const len = lastMsg.length;
+      const isQ = lastMsg.includes('?');
+      const isBoring = len < 10 && !isQ;
+      const isLong = len > 100;
+      const isVeryEngaging = isQ && len > 30;
+
+      let baseDelay;
+      if (isBoring) baseDelay = 8 * 60 * 1000 + Math.random() * 20 * 60 * 1000;
+      else if (isVeryEngaging) baseDelay = 1 * 60 * 1000 + Math.random() * 4 * 60 * 1000;
+      else if (isLong) baseDelay = 3 * 60 * 1000 + Math.random() * 8 * 60 * 1000;
+      else baseDelay = 2 * 60 * 1000 + Math.random() * 10 * 60 * 1000;
+
+      return json({ reply, delay: Math.floor(baseDelay) });
+    }
+
     return json({ error: 'not found' }, 404);
   }
 };
