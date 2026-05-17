@@ -482,7 +482,7 @@ ${mood === 'happy' ? 'Good energy today. Warmer, slightly more talkative.' : ''}
 
 You decide the tone completely. Be yourself. No rules on warmth or coldness.`;
 
-      const fullMsgs = [{ role: 'system', content: enrichedSystem }, ...messages];
+      const fullMsgs = [{ role: 'system', content: enrichedSystem }, ...messages.map(m => ({ role: m.role, content: m.content }))];
 
       const aiRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
