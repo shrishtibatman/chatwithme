@@ -267,7 +267,6 @@ export default {
       if (b.doing_now !== undefined)  { fields.push('doing_now=?');    vals.push(b.doing_now); }
       if (b.mood_locked !== undefined){ fields.push('mood_locked=?');  vals.push(b.mood_locked ? 1 : 0); }
       fields.push('updated_at=?'); vals.push(Date.now());
-      vals.push(1);
       if (fields.length > 1) await db.prepare(`UPDATE her_state SET ${fields.join(',')} WHERE id=1`).bind(...vals).run();
       return json({ ok: true });
     }
