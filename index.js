@@ -118,32 +118,35 @@ function getConvoMultiplier(lastMsg, messages) {
 // ══ AUTO MOOD SHIFT based on recent global convos ══
 async function computeAutoMood(db, currentMood) {
   try {
+    // look at last 2 hours of ALL messages (both user and assistant)
     const recentMsgs = await db.prepare(
-      `SELECT content FROM conversations WHERE role='user' AND ts > ? ORDER BY ts DESC LIMIT 30`
-    ).bind(Date.now() - 60 * 60 * 1000).all(); // last 1 hour
+      `SELECT role, content FROM conversations WHERE ts > ? ORDER BY ts DESC LIMIT 50`
+    ).bind(Date.now() - 2 * 60 * 60 * 1000).all();
 
-    const msgs = (recentMsgs.results || []).map(r => r.content);
-    if (msgs.length === 0) return currentMood;
+    const msgs = recentMsgs.results || [];
+    if (msgs.length < 3) return currentMood; // not enough data
 
-    const avgLen = msgs.reduce((a, b) => a + b.length, 0) / msgs.length;
-    const qCount = msgs.filter(m => m.includes('?')).length;
-    const boringCount = msgs.filter(m => m.length < 8).length;
-    const deepCount = msgs.filter(m => m.length > 80).length;
+    const userMsgs = msgs.filter(m => m.role === 'user').map(m => m.content);
+    const avgLen = userMsgs.reduce((a, b) => a + b.length, 0) / (userMsgs.length || 1);
+    const qCount = userMsgs.filter(m => m.includes('?')).length;
+    const deepCount = userMsgs.filter(m => m.length > 80).length;
+    const boringCount = userMsgs.filter(m => m.length < 6).length;
+    const totalUsers = new Set(msgs.map(m => m.user_id)).size;
 
-    const ist = getIST();
+    // too many one-word messages flooding in → bored/annoyed
+    if (boringCount > userMsgs.length * 0.65) return 'bored';
 
-    // Late night auto tired
-    if (ist.hour >= 2 && ist.hour < 6) return 'sleeping';
-    if (ist.hour >= 0 && ist.hour < 2) return 'tired';
+    // deep meaningful convos → curious or soft
+    if (deepCount >= 3 && qCount > userMsgs.length * 0.35) return 'curious';
+    if (deepCount >= 2 && avgLen > 60) return 'soft';
 
-    // Too many boring msgs globally
-    if (boringCount > msgs.length * 0.6) return 'bored';
-    // Deep convos happening
-    if (deepCount > 3 && qCount > msgs.length * 0.4) return 'curious';
-    // Normal active
-    if (avgLen > 50 && qCount > 2) return 'happy';
+    // good engaging energy → happy
+    if (avgLen > 40 && qCount >= 2 && boringCount < 3) return 'happy';
 
-    return currentMood; // no shift
+    // lots of people messaging at once → distracted
+    if (totalUsers > 3 && avgLen < 30) return 'distracted';
+
+    return currentMood; // no strong signal — stay as is
   } catch(e) {
     return currentMood;
   }
@@ -232,12 +235,15 @@ export default {
       const todaySchedule = customDay ? JSON.parse(customDay.slots) : DEFAULT_SCHEDULE[ist.day];
       const activity = getCurrentActivity(todaySchedule, ist.hour, ist.day);
 
-      // auto mood shift (only if not locked by owner)
+      // auto mood shift (only if not locked by owner AND there are recent messages)
       let mood = state?.mood || 'chill';
       if (!state?.mood_locked) {
-        mood = await computeAutoMood(db, mood);
-        if (mood !== state?.mood) {
-          await db.prepare(`UPDATE her_state SET mood=?, updated_at=? WHERE id=1`).bind(mood, Date.now()).run();
+        const recentCount = await db.prepare(`SELECT COUNT(*) as c FROM conversations WHERE ts > ?`).bind(Date.now() - 60 * 60 * 1000).first();
+        if (recentCount?.c > 0) {
+          mood = await computeAutoMood(db, mood);
+          if (mood !== state?.mood) {
+            await db.prepare(`UPDATE her_state SET mood=?, updated_at=? WHERE id=1`).bind(mood, Date.now()).run();
+          }
         }
       }
 
@@ -247,7 +253,8 @@ export default {
         doing_now: activity.activity,
         schedule_slot: activity,
         ist_hour: ist.hour,
-        mood_locked: state?.mood_locked || 0
+        mood_locked: state?.mood_locked || 0,
+        last_updated: state?.updated_at || null
       });
     }
 
@@ -430,9 +437,19 @@ export default {
       const { system, messages, userId } = b;
 
       // check ai_paused — if owner is handling this convo, skip AI
-      if (userId) {
+      if (userId && userId !== 'owner_clone') {
         const u = await db.prepare(`SELECT ai_paused FROM users WHERE id=?`).bind(userId).first();
         if (u?.ai_paused) return json({ reply: null, delay: 0, paused: true });
+      }
+
+      // save last user message to conversations so mood can adapt (including clone chat)
+      if (userId && messages?.length) {
+        const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+        if (lastUserMsg) {
+          const cid = (userId) + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+          try { await db.prepare(`INSERT OR IGNORE INTO conversations (id, user_id, role, content, ts) VALUES (?,?,?,?,?)`)
+            .bind(cid, userId, 'user', lastUserMsg.content, Date.now()).run(); } catch(e) {}
+        }
       }
 
       // get her state
