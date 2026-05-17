@@ -487,7 +487,7 @@ You decide the tone completely. Be yourself. No rules on warmth or coldness.`;
 
       const aiRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + env.GROQ_KEY },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + env.GROQ_API_KEY },
         body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: fullMsgs, max_tokens: 120, temperature: 0.95 })
       });
 
