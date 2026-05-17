@@ -99,20 +99,19 @@ const MOOD_MULTIPLIER = {
 };
 
 // ══ CONVO TYPE MULTIPLIER ══
-function getConvoMultiplier(lastMsg, msgCount) {
-  const len = lastMsg.length;
-  const isQ = lastMsg.includes('?');
-  const isGreeting = /^(hi+|hey+|hello|hlo|hii+|sup|yo)\s*[!.]*$/i.test(lastMsg.trim());
-  const isMidConvo = msgCount > 4;
-  const isOneLiner = len < 8 && !isQ;
-  const isLong = len > 120;
-  const isVeryEngaging = isQ && len > 40;
+function getConvoMultiplier(lastMsg, messages) {
+  const isGreeting = /^(hi+|hey+|hello|hlo|hii+|sup|yo|heyy+|hiiii*)\s*[!.]*$/i.test(lastMsg.trim());
 
-  if (isGreeting) return 0.4;          // "hii" always fast reply
-  if (isMidConvo && len < 60) return 0.5; // mid convo — she's already talking
-  if (isVeryEngaging) return 0.7;
-  if (isLong) return 1.1;
-  if (isOneLiner) return 1.5;          // boring one liner
+  const lastAssistantMsg = [...messages].reverse().find(m => m.role === 'assistant');
+  const lastAssistantTs = lastAssistantMsg?.ts || 0;
+  const timeSinceLastReply = lastAssistantTs ? Date.now() - lastAssistantTs : 999999999;
+  const isActiveConvo = timeSinceLastReply < 5 * 60 * 1000;
+  const isWarmConvo = timeSinceLastReply < 30 * 60 * 1000;
+
+  if (isGreeting && !isActiveConvo) return 0.3;
+  if (isGreeting && isActiveConvo) return 0.15;
+  if (isActiveConvo) return 0.2;
+  if (isWarmConvo) return 0.5;
   return 1.0;
 }
 
@@ -519,7 +518,7 @@ You decide the tone completely. Be yourself. No rules on warmth or coldness.`;
       if (mood === 'sleeping') return json({ reply: null, delay: 99 * 60 * 1000 });
 
       // convo multiplier
-      const convoMult = getConvoMultiplier(lastMsg, msgCount);
+      const convoMult = getConvoMultiplier(lastMsg, messages);
 
       // final delay in ms
       const finalMin = delayMin * moodMult * convoMult;
