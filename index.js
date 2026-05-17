@@ -590,12 +590,12 @@ You decide your tone completely. Be yourself.`;
       const aiRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + env.GROQ_API_KEY },
-        body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: fullMsgs, max_tokens: 150, temperature: 0.95 })
+        body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: fullMsgs, max_tokens: 500, temperature: 0.85 })
       });
 
       const aiData = await aiRes.json();
-      const raw    = aiData.choices?.[0]?.message?.content;
-      if (!raw) return json({ error: 'ai_failed', detail: aiData }, 502);
+      const raw    = aiData.choices?.[0]?.message?.content?.trim();
+      if (!raw || raw.length < 1) return json({ error: 'ai_failed', detail: aiData }, 502);
 
       const cleaned = raw
         .replace(/^(sure!?|of course!?|absolutely!?|certainly!?|great!?|wow!?)\s*/gi, '')
