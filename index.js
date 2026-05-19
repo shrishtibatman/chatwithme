@@ -269,6 +269,11 @@ async function initDB(db) {
     slots TEXT NOT NULL
   )`).run();
 
+  await db.prepare(`CREATE TABLE IF NOT EXISTS kv_store (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  )`).run();
+
   await db.prepare(`CREATE TABLE IF NOT EXISTS ai_errors (
     id TEXT PRIMARY KEY,
     ts INTEGER NOT NULL,
@@ -631,6 +636,19 @@ You decide your tone completely. Be yourself.`;
 
       // return all parts with staggered delays
       return json({ reply: parts[0], parts, delay: baseDelay });
+    }
+
+    // GET /api/owner-password
+    if (request.method === 'GET' && path === '/api/owner-password') {
+      const row = await db.prepare(`SELECT value FROM kv_store WHERE key='owner_pw_hash'`).first();
+      return json({ hash: row?.value || '' });
+    }
+
+    // POST /api/owner-password
+    if (request.method === 'POST' && path === '/api/owner-password') {
+      const b = await request.json();
+      await db.prepare(`INSERT OR REPLACE INTO kv_store (key, value) VALUES ('owner_pw_hash', ?)`).bind(b.hash).run();
+      return json({ ok: true });
     }
 
     // POST /api/errors  — log an AI error from index.html
