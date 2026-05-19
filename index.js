@@ -445,6 +445,13 @@ export default {
       return json({ ok: true, id });
     }
 
+    // GET /api/pending-peek/:userId  — owner dashboard only, does NOT deliver, just shows ETA
+    if (request.method === 'GET' && path.startsWith('/api/pending-peek/')) {
+      const userId = decodeURIComponent(path.split('/api/pending-peek/')[1]);
+      const next = await db.prepare(`SELECT send_at FROM pending_replies WHERE user_id=? AND sent=0 ORDER BY send_at ASC LIMIT 1`).bind(userId).first();
+      return json({ send_at: next ? next.send_at : null });
+    }
+
     // GET /api/pending/:userId
     if (request.method === 'GET' && path.startsWith('/api/pending/')) {
       const userId = decodeURIComponent(path.split('/api/pending/')[1]);
