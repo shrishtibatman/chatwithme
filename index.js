@@ -465,6 +465,12 @@ export default {
       const row = await db.prepare(`SELECT * FROM pending_replies WHERE user_id=? AND sent=0 AND send_at<=? ORDER BY send_at ASC LIMIT 1`).bind(userId, now).first();
       if (row) {
         await db.prepare(`UPDATE pending_replies SET sent=1 WHERE id=?`).bind(row.id).run();
+        // save AI reply to conversations so owner dashboard shows it
+        const cid = userId + '_ai_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+        try {
+          await db.prepare(`INSERT OR IGNORE INTO conversations (id, user_id, role, content, ts) VALUES (?,?,?,?,?)`)
+            .bind(cid, userId, 'assistant', row.reply, Date.now()).run();
+        } catch(e) {}
         return json({ reply: row.reply });
       }
       const future = await db.prepare(`SELECT send_at, reply FROM pending_replies WHERE user_id=? AND sent=0 ORDER BY send_at ASC LIMIT 1`).bind(userId).first();
@@ -525,17 +531,7 @@ export default {
         if (u?.ai_paused) return json({ reply: null, delay: 0, paused: true });
       }
 
-      // save last user message
-      if (userId && messages?.length) {
-        const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-        if (lastUserMsg) {
-          const cid = userId + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
-          try {
-            await db.prepare(`INSERT OR IGNORE INTO conversations (id, user_id, role, content, ts) VALUES (?,?,?,?,?)`)
-              .bind(cid, userId, 'user', lastUserMsg.content, Date.now()).run();
-          } catch(e) {}
-        }
-      }
+      // user message already saved by frontend via POST /api/chats/:userId
 
       // get her state
       const state = await db.prepare(`SELECT * FROM her_state WHERE id=1`).first();
@@ -614,10 +610,8 @@ You decide your tone completely. Be yourself.`;
 
       const GROQ_MODELS = [
         'llama-3.3-70b-versatile',
-        'openai/gpt-oss-20b',
         'meta-llama/llama-4-scout-17b-16e-instruct',
         'qwen/qwen3-32b',
-        'openai/gpt-oss-120b',
         'llama-3.1-8b-instant',
       ];
       let raw = null;
