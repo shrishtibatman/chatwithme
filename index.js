@@ -281,6 +281,12 @@ async function initDB(db) {
     msg TEXT
   )`).run();
 
+  await db.prepare(`CREATE TABLE IF NOT EXISTS training_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`).run();
+
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(user_id)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_conv_ts ON conversations(ts)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_pending ON pending_replies(send_at, sent)`).run();
@@ -606,15 +612,34 @@ You decide your tone completely. Be yourself.`;
         ...messages.map(m => ({ role: m.role, content: m.content }))
       ];
 
-      const aiRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + env.GROQ_API_KEY },
-        body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: fullMsgs, max_tokens: 500, temperature: 0.85 })
-      });
-
-      const aiData = await aiRes.json();
-      const raw    = aiData.choices?.[0]?.message?.content?.trim();
-      if (!raw || raw.length < 1) return json({ error: 'ai_failed', detail: aiData }, 502);
+      const GROQ_MODELS = [
+        'llama-3.3-70b-versatile',
+        'llama-3.1-70b-versatile',
+        'llama-4-scout-17b-16e-instruct',
+        'llama3-70b-8192',
+        'qwen-qwq-32b',
+        'llama-3.1-8b-instant',
+      ];
+      let raw = null;
+      for (const model of GROQ_MODELS) {
+        try {
+          const aiRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + env.GROQ_API_KEY },
+            body: JSON.stringify({ model, messages: fullMsgs, max_tokens: 500, temperature: 0.85 })
+          });
+          if (aiRes.ok) {
+            const aiData = await aiRes.json();
+            raw = aiData.choices?.[0]?.message?.content?.trim() || null;
+            if (raw) break;
+          } else if (aiRes.status === 429) {
+            // rate limit — try next model
+          } else {
+            break; // hard error, stop
+          }
+        } catch(e) {}
+      }
+      if (!raw || raw.length < 1) return json({ error: 'ai_failed' }, 502);
 
       const cleaned = raw
         .replace(/^(sure!?|of course!?|absolutely!?|certainly!?|great!?|wow!?)\s*/gi, '')
