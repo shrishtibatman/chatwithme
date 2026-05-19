@@ -269,6 +269,13 @@ async function initDB(db) {
     slots TEXT NOT NULL
   )`).run();
 
+  await db.prepare(`CREATE TABLE IF NOT EXISTS ai_errors (
+    id TEXT PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    source TEXT,
+    msg TEXT
+  )`).run();
+
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(user_id)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_conv_ts ON conversations(ts)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_pending ON pending_replies(send_at, sent)`).run();
@@ -442,8 +449,8 @@ export default {
         await db.prepare(`UPDATE pending_replies SET sent=1 WHERE id=?`).bind(row.id).run();
         return json({ reply: row.reply });
       }
-      const future = await db.prepare(`SELECT send_at FROM pending_replies WHERE user_id=? AND sent=0 ORDER BY send_at ASC LIMIT 1`).bind(userId).first();
-      return json({ reply: null, next_at: future ? future.send_at : null });
+      const future = await db.prepare(`SELECT send_at, reply FROM pending_replies WHERE user_id=? AND sent=0 ORDER BY send_at ASC LIMIT 1`).bind(userId).first();
+      return json({ reply: null, next_at: future ? future.send_at : null, send_at: future ? future.send_at : null });
     }
 
     // GET /api/stats
@@ -624,6 +631,29 @@ You decide your tone completely. Be yourself.`;
 
       // return all parts with staggered delays
       return json({ reply: parts[0], parts, delay: baseDelay });
+    }
+
+    // POST /api/errors  — log an AI error from index.html
+    if (request.method === 'POST' && path === '/api/errors') {
+      const b = await request.json();
+      const id = 'err_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+      await db.prepare(`INSERT INTO ai_errors (id, ts, source, msg) VALUES (?, ?, ?, ?)`)
+        .bind(id, b.ts || Date.now(), b.source || 'unknown', b.msg || '').run();
+      // keep only last 100 errors
+      await db.prepare(`DELETE FROM ai_errors WHERE id NOT IN (SELECT id FROM ai_errors ORDER BY ts DESC LIMIT 100)`).run();
+      return json({ ok: true });
+    }
+
+    // GET /api/errors  — fetch all errors for owner dashboard
+    if (request.method === 'GET' && path === '/api/errors') {
+      const { results } = await db.prepare(`SELECT ts, source, msg FROM ai_errors ORDER BY ts DESC LIMIT 100`).all();
+      return json(results || []);
+    }
+
+    // POST /api/errors/clear  — clear all errors
+    if (request.method === 'POST' && path === '/api/errors/clear') {
+      await db.prepare(`DELETE FROM ai_errors`).run();
+      return json({ ok: true });
     }
 
     return json({ error: 'not found' }, 404);
